@@ -515,131 +515,15 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
 
 <script>
 // ═══════════════════════════════════════════════════════
-//  STORAGE — fetches data from Google Apps Script
-//  On first run, prompts for the Apps Script deployment URL
+//  STORAGE KEYS
 // ═══════════════════════════════════════════════════════
-const SK        = 'bal_v3';         // localStorage key for data cache
-const SCRIPT_KEY = 'bal_script_url'; // localStorage key for Apps Script URL
+const SK         = 'bal_v3';          // localStorage cache key
+const SCRIPT_KEY = 'bal_script_url';  // Apps Script URL key
 
-let S              = defaultState();
-let currentTab     = 'all';
-let ownerFilter    = 'all';
-let _editingId     = null;
-let _editingRuleId = null;
-let _ccEditKey     = null;
-let _cashField     = null;
-let _nid           = Date.now();
-let _saveTimer     = null;
-let _scriptUrl     = localStorage.getItem(SCRIPT_KEY) || '';
-
-// ── FIRST-RUN SETUP ──────────────────────────────────
-// Called on startup. If no script URL saved, show setup screen.
-function initApp() {
-  if (!_scriptUrl) {
-    showSetupScreen();
-  } else {
-    loadFromSheet();
-  }
-}
-
-function showSetupScreen() {
-  document.getElementById('content').innerHTML = `
-    <div style="padding:32px 20px;max-width:480px;margin:0 auto">
-      <div style="font-size:32px;margin-bottom:16px">🔗</div>
-      <div style="font-size:20px;font-weight:800;color:var(--orange);margin-bottom:8px">Connect to Google Sheet</div>
-      <div style="font-size:14px;color:var(--text-dim);margin-bottom:24px;line-height:1.6">
-        Paste your Apps Script deployment URL below.<br>
-        This connects the app to your Balance spreadsheet for data sync.
-      </div>
-      <input id="setup-url-input" type="url"
-        placeholder="https://script.google.com/macros/s/.../exec"
-        style="width:100%;padding:12px;border:1.5px solid var(--border2);border-radius:10px;
-               font-size:14px;background:var(--bg2);color:var(--text);font-family:var(--font);
-               margin-bottom:14px;box-sizing:border-box">
-      <button onclick="saveScriptUrl()"
-        style="width:100%;padding:13px;background:var(--orange);color:#fff;border:none;
-               border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font)">
-        Connect →
-      </button>
-      <div style="margin-top:16px;font-size:11px;color:var(--text-muted);line-height:1.6">
-        <strong>Where to find this URL:</strong><br>
-        Balance Google Sheet → Extensions → Apps Script → Deploy → Manage deployments → copy the Web App URL
-      </div>
-    </div>
-  `;
-  // Also show a settings icon in topbar for re-connecting later
-  document.getElementById('topbar-sub').textContent = 'Setup required';
-}
-
-function saveScriptUrl() {
-  const input = document.getElementById('setup-url-input');
-  const url = (input ? input.value : '').trim();
-  if (!url.startsWith('https://script.google.com')) {
-    alert('Please enter a valid Apps Script URL starting with https://script.google.com');
-    return;
-  }
-  _scriptUrl = url;
-  localStorage.setItem(SCRIPT_KEY, url);
-  loadFromSheet();
-}
-
-// ── LOAD from Apps Script ─────────────────────────────
-function loadFromSheet() {
-  document.getElementById('topbar-sub').textContent = 'Loading…';
-
-  fetch(_scriptUrl + '?action=load')
-    .then(r => r.json())
-    .then(res => {
-      if (res.ok && res.data) {
-        try {
-          S = JSON.parse(res.data);
-        } catch(e) {
-          // Sheet is empty or first use — keep defaultState
-          S = defaultState();
-        }
-      } else {
-        S = defaultState();
-      }
-      render();
-    })
-    .catch(err => {
-      console.warn('Sheet load failed, using local cache:', err);
-      // Fall back to localStorage cache
-      try {
-        const cached = localStorage.getItem(SK);
-        if (cached) S = JSON.parse(cached);
-      } catch(e) {}
-      render();
-    });
-}
-
-// ── SAVE to Apps Script (debounced 800ms) ─────────────
-function save() {
-  // Write to localStorage immediately as a cache
-  try { localStorage.setItem(SK, JSON.stringify(S)); } catch(e) {}
-
-  // Debounce sheet writes
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(function() {
-    if (!_scriptUrl) return;
-    fetch(_scriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'save', data: JSON.stringify(S) })
-    })
-    .then(r => r.json())
-    .then(res => { if (!res.ok) console.warn('Save failed:', res.error); })
-    .catch(err => console.warn('Save fetch failed:', err));
-  }, 800);
-}
-
-// ── RESET script URL (accessible from Rules tab) ──────
-function resetScriptUrl() {
-  if (!confirm('Disconnect from Google Sheet and re-enter the Apps Script URL?')) return;
-  localStorage.removeItem(SCRIPT_KEY);
-  _scriptUrl = '';
-  showSetupScreen();
-}
+// ═══════════════════════════════════════════════════════
+//  DEFAULT STATE
+// ═══════════════════════════════════════════════════════
+function defaultState() {
   const today = todayStr();
   return {
     // Cash accounts with as-of date
@@ -722,6 +606,138 @@ function resetScriptUrl() {
     // One-off events (overrides / extras)
     oneoffs: []
   };
+}
+
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+let S              = defaultState();
+let currentTab     = 'all';
+let ownerFilter    = 'all';
+let _editingId     = null;
+let _editingRuleId = null;
+let _ccEditKey     = null;
+let _cashField     = null;
+let _nid           = Date.now();
+let _saveTimer     = null;
+let _scriptUrl     = localStorage.getItem(SCRIPT_KEY) || '';
+
+// ── INIT ─────────────────────────────────────────────
+function initApp() {
+  if (!_scriptUrl) {
+    showSetupScreen();
+  } else {
+    loadFromSheet();
+  }
+}
+
+// ── SETUP SCREEN (first run) ─────────────────────────
+function showSetupScreen() {
+  document.getElementById('topbar-sub').textContent = 'Setup required';
+  document.getElementById('hero-bal').textContent   = '—';
+  document.getElementById('content').innerHTML = `
+    <div style="padding:40px 24px;max-width:460px;margin:0 auto;text-align:center">
+      <div style="font-size:40px;margin-bottom:16px">🔗</div>
+      <div style="font-size:20px;font-weight:800;color:var(--orange);margin-bottom:10px">Connect to Google Sheet</div>
+      <div style="font-size:14px;color:var(--text-dim);margin-bottom:28px;line-height:1.7;text-align:left">
+        Paste your Apps Script deployment URL below to sync data with your Balance spreadsheet.
+      </div>
+      <input id="setup-url" type="url"
+        placeholder="https://script.google.com/macros/s/.../exec"
+        style="width:100%;padding:13px 14px;border:1.5px solid var(--border2);
+               border-radius:12px;font-size:14px;background:var(--surface);
+               color:var(--text);font-family:var(--font);margin-bottom:14px;
+               box-sizing:border-box;outline:none">
+      <button onclick="connectScript()"
+        style="width:100%;padding:14px;background:var(--orange);color:#fff;border:none;
+               border-radius:13px;font-size:16px;font-weight:700;cursor:pointer;
+               font-family:var(--font)">
+        Connect →
+      </button>
+      <div style="margin-top:20px;font-size:11px;color:var(--text-muted);line-height:1.8;text-align:left;
+                  background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+        <strong>How to get your URL:</strong><br>
+        1. Open your Balance Google Sheet<br>
+        2. Extensions → Apps Script<br>
+        3. Deploy → Manage deployments<br>
+        4. Copy the Web App URL
+      </div>
+    </div>
+  `;
+}
+
+function connectScript() {
+  const input = document.getElementById('setup-url');
+  const url   = (input ? input.value : '').trim();
+  if (!url.startsWith('https://script.google.com')) {
+    alert('Please paste a valid Apps Script URL\n(starts with https://script.google.com)');
+    return;
+  }
+  _scriptUrl = url;
+  localStorage.setItem(SCRIPT_KEY, url);
+  loadFromSheet();
+}
+
+// ── LOAD from Apps Script ─────────────────────────────
+function loadFromSheet() {
+  document.getElementById('topbar-sub').textContent = 'Loading…';
+
+  const controller = new AbortController();
+  const timeout    = setTimeout(() => controller.abort(), 10000);
+
+  fetch(_scriptUrl + '?action=load', { signal: controller.signal })
+    .then(r => { clearTimeout(timeout); return r.json(); })
+    .then(res => {
+      if (res.ok && res.data) {
+        try   { S = JSON.parse(res.data); }
+        catch (e) { S = defaultState(); }
+      } else {
+        // Reachable but empty — first use, keep defaults
+        S = defaultState();
+      }
+      render();
+    })
+    .catch(err => {
+      clearTimeout(timeout);
+      console.warn('Sheet load failed:', err.message);
+      // Try localStorage cache
+      try {
+        const cached = localStorage.getItem(SK);
+        if (cached) { S = JSON.parse(cached); render(); return; }
+      } catch(e) {}
+      // Nothing available — clear bad URL and show setup screen again
+      _scriptUrl = '';
+      localStorage.removeItem(SCRIPT_KEY);
+      alert('Could not connect to your Apps Script URL.\nPlease check the URL and try again.');
+      showSetupScreen();
+    });
+}
+
+// ── SAVE to Apps Script (debounced 800ms) ─────────────
+function save() {
+  // Cache locally for instant offline fallback
+  try { localStorage.setItem(SK, JSON.stringify(S)); } catch(e) {}
+
+  if (!_scriptUrl) return;
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function() {
+    fetch(_scriptUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body:    JSON.stringify({ action: 'save', data: JSON.stringify(S) })
+    })
+    .then(r => r.json())
+    .then(res => { if (!res.ok) console.warn('Save error:', res.error); })
+    .catch(err  => console.warn('Save failed:', err.message));
+  }, 800);
+}
+
+// ── RECONNECT (from Rules tab) ────────────────────────
+function resetScriptUrl() {
+  if (!confirm('Disconnect from Google Sheet and re-enter the Apps Script URL?')) return;
+  localStorage.removeItem(SCRIPT_KEY);
+  _scriptUrl = '';
+  showSetupScreen();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1310,22 +1326,27 @@ function renderRules(cont) {
   html += `<div class="section-lbl" style="margin-top:6px">Credit Card Rules</div>`;
   credit.forEach(r => html += ruleHTML(r));
   html += `
-    <div style="margin:16px 12px 4px;padding:12px 14px;background:var(--surface);
-                border:1px solid var(--border);border-radius:12px;
-                display:flex;align-items:center;justify-content:space-between">
+    <div style="margin:14px 12px 4px;background:var(--surface);border:1px solid var(--border);
+                border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between">
       <div>
-        <div style="font-size:12px;font-weight:700;color:var(--text)">⚙️ Data Source</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;word-break:break-all">${_scriptUrl ? '🟢 Connected to Google Sheet' : '🔴 Not connected'}</div>
+        <div style="font-size:12px;font-weight:700;color:var(--text)">⚙️ Google Sheet Connection</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+          ${_scriptUrl ? '🟢 Connected' : '🔴 Not connected'}
+        </div>
       </div>
       <button onclick="resetScriptUrl()"
         style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;
-               padding:6px 12px;font-size:12px;font-weight:600;color:var(--text-dim);
-               cursor:pointer;font-family:var(--font);flex-shrink:0;margin-left:12px">
+               padding:7px 13px;font-size:12px;font-weight:600;color:var(--text-dim);
+               cursor:pointer;font-family:var(--font);white-space:nowrap;margin-left:12px">
         Reconnect
       </button>
     </div>
   `;
   cont.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════
+//  NAV
 // ═══════════════════════════════════════════════════════
 function switchTab(tab) { currentTab = tab; render(); }
 function setOwner(o, el) {
